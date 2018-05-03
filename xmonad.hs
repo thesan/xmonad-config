@@ -1,3 +1,6 @@
+{-# LANGUAGE DeriveDataTypeable, FlexibleContexts, MultiParamTypeClasses, TypeSynonymInstances #-}
+
+-----------------------------------------------------------------------------
 import XMonad
 
 import XMonad.Config.Mate
@@ -5,6 +8,7 @@ import XMonad.Config.Mate
 import XMonad.Actions.CycleWS
 import XMonad.Actions.UpdatePointer
 
+-- import XMonad.Hooks.FadeInactive
 import XMonad.Hooks.ManageDocks
 import XMonad.Hooks.ManageHelpers
 
@@ -14,7 +18,6 @@ import XMonad.Layout.MouseResizableTile
 import XMonad.Layout.MultiToggle
 import XMonad.Layout.MultiToggle.Instances
 import XMonad.Layout.NoBorders
-import XMonad.Layout.PerWorkspace
 import XMonad.Layout.Spacing
 
 import qualified XMonad.StackSet as W
@@ -24,20 +27,44 @@ import System.Environment (getEnvironment)
 
 (.>) = flip (.)
 
-swapLayout = sendMessage NextLayout
 
-resetLayout conf
-  = setLayout $ XMonad.layoutHook conf
+data NONE = NONE deriving (Read, Show, Eq, Typeable)
+instance Transformer NONE Window where
+  transform _ x k = k x (const x)
+
+data MAXIMIZED = MAXIMIZED deriving (Read, Show, Eq, Typeable)
+instance Transformer MAXIMIZED Window where
+  transform _ x k = k (avoidStruts $ noBorders Full) (const x)
+
+
+toggleLayout layout
+  = withFocused (windows . W.sink) >> sendMessage (Toggle layout)
+
+-- sendNoRefresh msg = do
+--   w <- W.workspace . W.current <$> gets windowset
+--   sendMessageWithNoRefresh msg w
+--
+-- useLayout conf layoutT
+--   = setLayout (XMonad.layoutHook conf) >> toggleLayout layoutT
+--
+-- pickLayout n = gotoL n >> refresh where
+--   gotoL n = foldr nextL (sendNoRefresh FirstLayout) [0..n-1]
+--   nextL _ state = state >> sendNoRefresh NextLayout
+
+
+toggleMaximise = toggleLayout MAXIMIZED
+
+resetLayoutToggle = toggleLayout NONE
 
 
 moveWithWindow wsTag
   = W.shift wsTag .> W.view wsTag
 
-doOnWs :: WorkspaceId -> X () -> X () -> X ()
-doOnWs wsTag wsA otherA
+doOnWs :: [WorkspaceId] -> X () -> X () -> X ()
+doOnWs wsTags wsA otherA
   = do
     cur <- gets (W.currentTag . windowset)
-    if cur == wsTag
+    if cur `elem` wsTags
       then wsA
       else otherA
 
@@ -62,7 +89,9 @@ myConfig screencount
 
 myKeys screencount conf@XConfig {modMask = modm}
   = M.fromList
-  $ [ ( (modm, xK_f), sendMessage $ Toggle NBFULL)
+  $ [ ( (mod4Mask, xK_f), toggleLayout NBFULL )
+
+    , ( (mod4Mask .|. shiftMask, xK_f), toggleLayout NONE )
 
     , ( (modm, xK_p), spawn "exe=`dmenu_path | dmenu` && eval \"exec $exe\"" )
 
@@ -70,122 +99,127 @@ myKeys screencount conf@XConfig {modMask = modm}
 
     , ( (modm, xK_c), kill )
 
+    , ( (0, xK_F8), toggleWS )
+    -- , ( (0, xK_F9), toggleOrView "default" )
+
 
     ---
     -- WASD directions bindings
     ---
 
     -- ALT + WASD
-    , ( (modm, xK_a), prevWS )
-    , ( (modm, xK_d), nextWS )
-    , ( (modm, xK_w), windows W.focusUp )
-    , ( (modm, xK_s), windows W.focusDown )
+    -- W/S swap window but keep at on the same position
+    , ( (modm, xK_a), shiftToPrev )
+    , ( (modm, xK_d), shiftToNext )
+    , ( (modm, xK_w), windows $ W.swapUp .> W.focusDown )
+    , ( (modm, xK_s), windows $ W.swapDown .> W.focusUp )
 
     -- ALT + SHIFT + WASD
-    -- W/S swap window but keep at on the same position
-    , ( (modm .|. shiftMask, xK_a), shiftToPrev )
-    , ( (modm .|. shiftMask, xK_d), shiftToNext )
-    , ( (modm .|. shiftMask, xK_w), windows $ W.swapUp .> W.focusDown )
-    , ( (modm .|. shiftMask, xK_s), windows $ W.swapDown .> W.focusUp )
+    , ( (modm .|. shiftMask, xK_a), shiftPrevScreen >> prevScreen )
+    , ( (modm .|. shiftMask, xK_d), shiftNextScreen >> nextScreen )
+    -- "Toggle maximize": Switch layout then set current window to master
+    , ( (mod4Mask .|. shiftMask, xK_w), toggleMaximise >> windows W.swapMaster )
 
     -- SUPER + WASD
-    -- A/D change workspace with the window and reset layout to get a clear view
-    , ( (mod4Mask, xK_a), shiftToPrev >> prevWS >> resetLayout conf )
-    , ( (mod4Mask, xK_d), shiftToNext >> nextWS >> resetLayout conf )
-    , ( (mod4Mask, xK_w), windows W.swapUp )
-    , ( (mod4Mask, xK_s), windows W.swapDown )
+    , ( (mod4Mask, xK_a), prevWS )
+    , ( (mod4Mask, xK_d), nextWS )
+    , ( (mod4Mask, xK_w), windows W.focusUp )
+    , ( (mod4Mask, xK_s), windows W.focusDown )
 
     -- SUPER + SHIFT + WASD
-    , ( (mod4Mask .|. shiftMask, xK_a), shiftPrevScreen )
-    , ( (mod4Mask .|. shiftMask, xK_d), shiftNextScreen )
-    -- "Toggle maximize": Switch layout then set current window to master
-    , ( (mod4Mask .|. shiftMask, xK_w), swapLayout >> windows W.swapMaster )
+    -- A/D change workspace with the window and reset layout to get a clear view
+    , ( (mod4Mask .|. shiftMask, xK_a), shiftToPrev >> prevWS >> resetLayoutToggle )
+    , ( (mod4Mask .|. shiftMask, xK_d), shiftToNext >> nextWS >> resetLayoutToggle )
+    , ( (mod4Mask .|. shiftMask, xK_w), windows W.swapUp )
+    , ( (mod4Mask .|. shiftMask, xK_s), windows W.swapDown )
 
 
     ---
     -- TAB, E or R
     ---
 
-    -- ALT + (TAB, E or R)
-    -- ALT + TAB is already "Move focus to the next window"
-    , ( (modm, xK_e), toggleOrView "default" )
-    , ( (modm, xK_r)
-      , doOnWs "default" swapLayout
-      $ resetLayout conf )
+    -- ALT + (TAB, E, R)
+    -- , ( (modm, xK_Tab), windows (W.swapDown .> W.focusUp) >> resetLayoutToggle )
+    , ( (modm, xK_Tab), nextScreen )
+    , ( (modm, xK_e), doOnWs boardWS toggleMaximise resetLayoutToggle )
+    , ( (modm, xK_r), toggleOrDoSkip [] W.shift "default" )
+    -- , ( (modm, xK_grave), doOnWs boardWS toggleMaximise
+    --   $ windows W.swapMaster >> resetLayoutToggle )
 
-    -- ALT + SHIFT + (TAB, E or R)
+    -- ALT + SHIFT + (TAB, E, R `)
     -- ALT + SHIFT + TAB is already "Move focus to the pevious window"
     -- ALT + SHIFT + R maximize on default, set as master on other (usefull mouse gesture)
-    , ( (modm .|. shiftMask, xK_e), toggleOrDoSkip [] W.shift "default" )
-    , ( (modm .|. shiftMask, xK_r)
-      , doOnWs "default" swapLayout
-      $ windows W.swapMaster )
+    -- , ( (modm .|. shiftMask, xK_Tab), windows W.focusUp >> resetLayoutToggle )
+    , ( (modm .|. shiftMask, xK_Tab), swapNextScreen )
+    , ( (modm .|. shiftMask, xK_e)
+      , toggleOrDoSkip [] moveWithWindow "default" >> resetLayoutToggle
+      )
+    , ( (modm .|. shiftMask, xK_r), toggleLayout MAXIMIZED )
+    -- , ( (modm .|. shiftMask, xK_r)
+    --   , doOnWs boardWS toggleMaximise
+    --     $ windows W.swapMaster >> resetLayoutToggle
+    --   )
 
-    -- SUPER + (TAB, E or R)
-    , ( (mod4Mask, xK_Tab), nextScreen )
-    , ( (mod4Mask, xK_e)
-      , toggleOrDoSkip [] moveWithWindow "default" >> resetLayout conf )
-    , ( (mod4Mask, xK_r), resetLayout conf )
+    -- SUPER + (TAB, E or R, `)
+    , ( (mod4Mask, xK_Tab), windows W.focusDown )
+    , ( (mod4Mask, xK_e), toggleLayout MAXIMIZED )
+    , ( (mod4Mask, xK_r), toggleOrView "default" )
+    , ( (mod4Mask, xK_grave), toggleLayout MAXIMIZED )
 
     -- SUPER + SHIFT + (TAB, E or R)
-    , ( (mod4Mask .|. shiftMask, xK_Tab), swapNextScreen )
+    , ( (mod4Mask .|. shiftMask, xK_Tab), windows W.focusUp )
+    , ( (mod4Mask .|. shiftMask, xK_e), toggleLayout NONE )
+    , ( (mod4Mask .|. shiftMask, xK_grave), toggleLayout NONE )
+
+    , ( (mod4Mask, xK_Page_Up), toggleOrView "default" )
+    , ( (mod4Mask, xK_Page_Down), toggleOrView "last" )
     ]
 
     ++
-
-    -- SUPER + [1..9], move workspace with focused window
-    [ ( (mod4Mask, key), windows (moveWithWindow wsTag) >> resetLayout conf )
-      | (key, wsTag) <- zip [xK_1 .. xK_9] (XMonad.workspaces conf)
+    -- SUPER + SHIFT + [1..9], move workspace with focused window
+    -- ALT + [1..9], move workspace with focused window
+    [ ( (mask, key), action wsTag )
+        | (key, wsTag) <- zip [xK_1 .. xK_9] $ XMonad.workspaces conf
+        , (mask, action) <-
+            [ ( mod4Mask .|. shiftMask
+              , \wsTag -> windows (moveWithWindow wsTag) >> resetLayoutToggle
+              )
+            , (mod4Mask, windows . W.greedyView)
+            , (modm, windows . W.shift)
+            ]
     ]
 
 
-myWorkspaces = ["default", "browser", "debug", "code"] ++ map show [5..9]
+myWorkspaces = ["default", "debug", "code", "4", "5", "6", "board1", "board2", "last"]
+boardWS = ["default", "board1", "board2"]
 
 
 myManageHook = composeAll
   [ manageDocks
-  , isFullscreen --> doFullFloat ]
+  , isFullscreen
+    --> doFullFloat
+  , className =? "Shutter"
+    --> doCenterFloat
+  ]
 
 
 myLayout screencount
-
-  -- Add a full screen mode
-  = mkToggle1 NBFULL
-
-  -- Add spacing for the panels
+  = mkToggle (NONE ?? NBFULL ?? MAXIMIZED ?? EOT)
   $ avoidStruts
-
-  $ onWorkspace "default" (mySpacing stackGrid ||| maximized)
-  $ onWorkspace "code" (mySpacing mouseResizableWide ||| maximized)
-  $ mySpacing mouseResizableDefault ||| maximized
-
+  $ smartBorders
+  $ smartSpacingWithEdge 3
+  $ stackGrid ||| tileWide ||| tileTall
   where
-
-    maximized
-      = noBorders Full
-
-    stackGrid
-      = GridRatio (4/3) False
-
-    mouseResizableDefault
-      = if screencount > 1
-        then mouseResizableWide
-        else mouseResizableTall
-
-    mouseResizableWide
-      = mouseResizableTall { isMirrored = True }
-
-    --- For some reason only dragger a lot bigger than the spacing works well
-    mouseResizableTall
-      = mouseResizableTile { draggerType = FixedDragger 0 24 }
-
-    mySpacing layout
-      = smartBorders $ smartSpacingWithEdge 3 layout
+    stackGrid = GridRatio (4/3) False
+    tileWide = tile { masterFrac = 9/10, isMirrored = True }
+    tileTall = tile { masterFrac = 2/3 }
+    tile = mouseResizableTile { draggerType = FixedDragger 0 24 }
 
 
 myLogHook
   = logHook mateConfig
   >> updatePointer (0.5, 0.5) (1, 1)
+  -- >> fadeInactiveCurrentWSLogHook 0.8
 
 
 myStartupHook screencount
@@ -193,6 +227,7 @@ myStartupHook screencount
   >> if screencount > 1
     then spawn
       "dconf write /org/mate/panel/general/toplevel-id-list \"['bottom', 'toplevel-2']\""
+      >> spawn "xsetwacom set 'Atmel Atmel maXTouch Digitizer' MapToOutput eDP1"
     else spawn
       "dconf write /org/mate/panel/general/toplevel-id-list \"['bottom']\""
 
