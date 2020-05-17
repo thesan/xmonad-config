@@ -3,6 +3,9 @@
 -----------------------------------------------------------------------------
 import XMonad
 
+import Control.Monad (when, join)
+import Data.Maybe (maybeToList)
+
 import XMonad.Config.Mate
 
 import XMonad.Actions.CycleWS
@@ -12,6 +15,7 @@ import XMonad.Actions.UpdatePointer
 import XMonad.Hooks.ManageDocks
 import XMonad.Hooks.ManageHelpers
 
+import qualified XMonad.Hooks.EwmhDesktops as EwmhD
 import XMonad.Layout.HintedGrid
 import XMonad.Layout.IndependentScreens
 import XMonad.Layout.MouseResizableTile
@@ -79,7 +83,7 @@ myConfig screencount
   , normalBorderColor  = "#000000"
   , focusedBorderColor = "#aaaaaa"
 
-  , handleEventHook = docksEventHook >> handleEventHook mateConfig
+  , handleEventHook = handleEventHook mateConfig <+> EwmhD.fullscreenEventHook <+> docksEventHook
   , layoutHook = myLayout screencount
   , logHook = myLogHook
   , manageHook = myManageHook
@@ -230,6 +234,24 @@ myStartupHook screencount
       >> spawn "xsetwacom set 'Atmel Atmel maXTouch Digitizer' MapToOutput eDP1"
     else spawn
       "dconf write /org/mate/panel/general/toplevel-id-list \"['bottom']\""
+  >> addEWMHFullscreen
+  where
+    -- See: https://github.com/xmonad/xmonad-contrib/issues/183#issuecomment-307407822
+    addNETSupported :: Atom -> X ()
+    addNETSupported x   = withDisplay $ \dpy -> do
+      r               <- asks theRoot
+      a_NET_SUPPORTED <- getAtom "_NET_SUPPORTED"
+      a               <- getAtom "ATOM"
+      liftIO $ do
+        sup <- (join . maybeToList) <$> getWindowProperty32 dpy a_NET_SUPPORTED r
+        when (fromIntegral x `notElem` sup) $
+          changeProperty32 dpy r a_NET_SUPPORTED a propModeAppend [fromIntegral x]
+
+    addEWMHFullscreen :: X ()
+    addEWMHFullscreen   = do
+      wms <- getAtom "_NET_WM_STATE"
+      wfs <- getAtom "_NET_WM_STATE_FULLSCREEN"
+      mapM_ addNETSupported [wms, wfs]
 
 
 main
