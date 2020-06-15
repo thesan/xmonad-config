@@ -10,6 +10,7 @@ import XMonad.Config.Mate
 
 import XMonad.Actions.CycleWS
 import XMonad.Actions.UpdatePointer
+import XMonad.Actions.CopyWindow
 
 -- import XMonad.Hooks.FadeInactive
 import XMonad.Hooks.ManageDocks
@@ -204,6 +205,18 @@ myManageHook = composeAll
     --> doFullFloat
   , className =? "Shutter"
     --> doCenterFloat
+
+  -- For nteract loading screen
+  , className =? "nteract" <&&> title =? "loading"
+    --> doFloat
+
+  -- For Kupfer QRcodes
+  , className =? "Kupfer.py"
+    --> doCenterFloat
+
+  -- E.g for Firefox picture in picture
+  , isInProperty "_NET_WM_WINDOW_TYPE" "_NET_WM_WINDOW_TYPE_UTILITY"
+    --> doF copyToAll <+> doFloat
   ]
 
 
